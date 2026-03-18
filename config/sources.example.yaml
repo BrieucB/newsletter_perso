@@ -1,0 +1,72 @@
+global:
+  recipient_email: ${NEWSLETTER_RECIPIENT}
+  sender_email: ${NEWSLETTER_SENDER}
+  timezone: Europe/Madrid
+  max_candidates_per_source: 10
+  max_shortlist_per_topic: 8
+  openai_model: gpt-5.4-mini
+  database_path: data/newsletter.sqlite3
+  preview_output_path: preview/newsletter_preview.html
+  schedule: "Monday / Wednesday / Friday at 08:00 Europe/Madrid"
+
+arxiv_queries:
+  - name: simulation-based inference
+    query: simulation-based inference
+  - name: sequential neural posterior estimation
+    query: sequential neural posterior estimation
+  - name: Bayesian calibration
+    query: Bayesian calibration
+  - name: Bayesian inverse problems
+    query: Bayesian inverse problems
+  - name: surrogate modeling uncertainty quantification
+    query: surrogate modeling uncertainty quantification
+  - name: multifidelity surrogate Bayesian calibration
+    query: multifidelity surrogate Bayesian calibration
+  - name: transition Markov chain Monte Carlo
+    query: transition Markov chain Monte Carlo
+  - name: approximate Bayesian computation surrogate model
+    query: approximate Bayesian computation surrogate model
+  - name: physics-informed surrogate uncertainty quantification
+    query: physics-informed surrogate uncertainty quantification
+  - name: Gaussian process surrogate calibration
+    query: Gaussian process surrogate calibration
+  - name: neural operator uncertainty quantification
+    query: neural operator uncertainty quantification
+  - name: high-performance computing uncertainty quantification
+    query: high-performance computing uncertainty quantification
+  - name: GPU-accelerated Bayesian inference
+    query: GPU-accelerated Bayesian inference
+  - name: parallel MCMC Bayesian inverse problems
+    query: parallel MCMC Bayesian inverse problems
+  - name: ultrasound contrast agents microbubble modeling
+    query: ultrasound contrast agents microbubble modeling
+
+github_tracked_repos:
+  - repo: vllm-project/vllm
+  - repo: ggml-org/llama.cpp
+  - repo: stanfordnlp/dspy
+  - repo: BerriAI/litellm
+
+github_search_queries:
+  - name: llm inference serving
+    query: llm inference serving
+  - name: agent framework llm
+    query: agent framework llm
+  - name: rag evaluation
+    query: rag evaluation
+  - name: openai-compatible proxy
+    query: openai-compatible proxy
+  - name: prompt optimization
+    query: prompt optimization
+  - name: model serving gpu
+    query: model serving gpu
+  - name: llm evals
+    query: llm evals
+
+rss_feeds:
+  - name: OpenAI News
+    url: https://openai.com/news/rss.xml
+  - name: Hugging Face Blog
+    url: https://huggingface.co/blog/feed.xml
+  - name: Anthropic News
+    url: https://www.anthropic.com/news/rss.xml

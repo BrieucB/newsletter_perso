@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+token.json
+oauth_client_secret.json
+preview/
+data/
+*.sqlite3

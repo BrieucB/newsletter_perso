@@ -1,0 +1,192 @@
+Metadata-Version: 2.4
+Name: newsletter-v0
+Version: 0.1.0
+Summary: Local-first personal newsletter service for UQ/HPC and LLM news.
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: feedparser>=6.0.11
+Requires-Dist: google-api-python-client>=2.166.0
+Requires-Dist: google-auth>=2.39.0
+Requires-Dist: google-auth-oauthlib>=1.2.1
+Requires-Dist: jinja2>=3.1.6
+Requires-Dist: openai>=1.75.0
+Requires-Dist: pydantic>=2.10.6
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: pyyaml>=6.0.2
+Requires-Dist: requests>=2.32.3
+Provides-Extra: dev
+Requires-Dist: mypy>=1.15.0; extra == "dev"
+Requires-Dist: pytest>=8.3.5; extra == "dev"
+Requires-Dist: ruff>=0.11.2; extra == "dev"
+Requires-Dist: types-PyYAML>=6.0.12.20241230; extra == "dev"
+Requires-Dist: types-requests>=2.32.0.20250306; extra == "dev"
+
+# newsletter_v0
+
+`newsletter_v0` is a local-first Python service that collects UQ/HPC and LLM news, stores everything in SQLite, ranks candidates with deterministic rules, uses one OpenAI call to produce a structured newsletter edition, renders simple HTML, and sends it directly through Gmail API.
+
+The V0 is optimized for speed of delivery:
+- Python 3.12, SQLite, YAML config, `.env` secrets
+- arXiv + GitHub + RSS collectors
+- one structured OpenAI generation call per edition
+- direct Gmail send, no draft mode
+- short HTML output designed for a 5-minute read
+
+## Architecture
+
+Pipeline steps:
+1. Fetch candidates from configured sources.
+2. Normalize into one internal Pydantic model.
+3. Deduplicate by URL, normalized title, and content hash.
+4. Compute deterministic pre-scores.
+5. Shortlist top candidates per topic.
+6. Make one OpenAI call to rerank, select, and write newsletter content as strict JSON.
+7. Render HTML and text.
+8. Send via Gmail API.
+9. Persist items, issues, issue-item links, and pipeline run logs in SQLite.
+
+Key folders:
+- `src/app/collectors/`: arXiv, RSS, GitHub collectors
+- `src/app/repositories/`: SQLite persistence
+- `src/app/ranking/`: deterministic scoring and shortlist logic
+- `src/app/llm/`: prompt, schema, OpenAI client, issue generation
+- `src/app/render/`: HTML + text rendering
+- `src/app/email/`: Gmail OAuth and send
+- `src/app/pipeline/`: orchestration
+
+## Setup
+
+1. Create a virtual environment and install the project:
+
+```bash
+cd newsletter_v0
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+2. Copy the example files:
+
+```bash
+cp .env.example .env
+cp config/sources.example.yaml config/sources.yaml
+```
+
+3. Fill in `.env`:
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` optional, defaults to `gpt-5.4-mini`
+- `GMAIL_CLIENT_SECRET_FILE`
+- `GMAIL_TOKEN_FILE`
+- `NEWSLETTER_RECIPIENT`
+- `NEWSLETTER_SENDER`
+- `GITHUB_TOKEN` optional but recommended
+
+## Gmail OAuth
+
+Create OAuth desktop credentials in Google Cloud for Gmail API and save the downloaded JSON locally, for example as `oauth_client_secret.json`.
+
+The app uses the minimal send scope:
+- `https://www.googleapis.com/auth/gmail.send`
+
+Bootstrap the token once:
+
+```bash
+python scripts/bootstrap_gmail_oauth.py
+```
+
+That stores `token.json` locally. The send command then uses it directly.
+
+## Run Locally
+
+Initialize the database:
+
+```bash
+python -m app.main init-db
+```
+
+Fetch sources:
+
+```bash
+python -m app.main fetch
+```
+
+Score and shortlist:
+
+```bash
+python -m app.main score
+```
+
+Preview from the current database state:
+
+```bash
+python -m app.main preview
+```
+
+Run the full pipeline without sending:
+
+```bash
+python -m app.main run
+```
+
+Run the full pipeline and send email:
+
+```bash
+python -m app.main send
+```
+
+`preview` writes HTML to the configured preview path, which defaults to `preview/newsletter_preview.html`.
+
+## Configuration
+
+Source configuration lives in `config/sources.yaml`.
+
+Global settings include:
+- recipient and sender email
+- timezone
+- per-source candidate cap
+- per-topic shortlist cap
+- OpenAI model name
+- DB path and preview output path
+- schedule metadata
+
+V0 ships with:
+- 15 default arXiv keyword queries for UQ/HPC
+- tracked GitHub repos for `vllm`, `llama.cpp`, `dspy`, and `litellm`
+- GitHub repository search queries for LLM tooling topics
+- example RSS feeds for OpenAI, Anthropic, and Hugging Face
+
+If a source does not expose a clean RSS feed in V0, leave it disabled or replace it with a working feed URL. The codebase is shaped so small custom collectors can be added later without changing the pipeline.
+
+## Cron
+
+The app does not ship with an internal scheduler. Use cron or a server scheduler instead.
+
+Example for Monday, Wednesday, Friday at 08:00 Europe/Madrid:
+
+```cron
+0 8 * * 1,3,5 cd /path/to/newsletter_v0 && /path/to/newsletter_v0/.venv/bin/python -m app.main send >> cron.log 2>&1
+```
+
+The send pipeline is idempotent enough for retries:
+- duplicates already sent are excluded by rules
+- the same-day edition subject is reused if it already exists
+- a previously drafted same-day issue is reused instead of making another LLM call
+
+## Quality Checks
+
+```bash
+ruff check .
+mypy src
+pytest
+```
+
+GitHub Actions runs the same checks on push and pull request.
+
+## Future Improvements
+
+- add small migration files instead of a single schema bootstrap
+- support more official feeds and custom page scrapers
+- add richer scoring features and explicit LLM confidence
+- add retry/backoff and structured observability
+- split storage and execution layers for an easier server deployment
