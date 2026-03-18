@@ -71,10 +71,15 @@ class FeedbackContext(BaseModel):
     issue_id: int
     item_id: int
     vote: str
+    external_event_id: str | None = None
+    channel: str = "cli"
+    recipient_key: str | None = None
     source_name: str
     topic: str
     content_type: str | None = None
     fit_tag: str | None = None
     section_name: str | None = None
+    source_url: str | None = None
+    item_title: str | None = None
     feature_snapshot: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None

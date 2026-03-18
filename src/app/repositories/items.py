@@ -311,6 +311,21 @@ class ItemsRepository:
             ).fetchone(),
         )
 
+    def get_issue_context(self, *, issue_id: int, item_id: int) -> sqlite3.Row | None:
+        return cast(
+            sqlite3.Row | None,
+            self.connection.execute(
+                """
+                SELECT ii.issue_id, ii.section_name, iss.subject, iss.status
+                FROM issue_items AS ii
+                JOIN issues AS iss ON iss.id = ii.issue_id
+                WHERE ii.issue_id = ? AND ii.item_id = ?
+                LIMIT 1
+                """,
+                (issue_id, item_id),
+            ).fetchone(),
+        )
+
     def list_issue_items(self, issue_id: int) -> list[sqlite3.Row]:
         return self.connection.execute(
             """

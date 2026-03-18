@@ -43,6 +43,14 @@
                   <strong>{{ item.source_name }}</strong> ·
                   <a href="{{ item.source_url }}" style="color:#0f5f8c;">Source link</a>
                 </p>
+                {% set item_feedback = feedback_links.get(item.candidate_id) %}
+                {% if item_feedback %}
+                  <p style="margin:10px 0 0;font-size:13px;line-height:1.5;color:#486581;">
+                    <a href="{{ item_feedback.upvote_url }}" style="color:#0f5f8c;">+ good rec</a>
+                    ·
+                    <a href="{{ item_feedback.downvote_url }}" style="color:#0f5f8c;">- bad rec</a>
+                  </p>
+                {% endif %}
               </div>
             {% endfor %}
           {% endif %}

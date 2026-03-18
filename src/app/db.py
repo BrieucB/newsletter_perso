@@ -13,6 +13,19 @@ ITEM_COLUMN_MIGRATIONS = {
     "selection_reason_json": "TEXT",
 }
 
+FEEDBACK_COLUMN_MIGRATIONS = {
+    "external_event_id": "TEXT",
+    "channel": "TEXT NOT NULL DEFAULT 'cli'",
+    "recipient_key": "TEXT",
+}
+
+POST_SCHEMA_STATEMENTS = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_external_event_id "
+    "ON feedback(external_event_id)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_channel ON feedback(channel)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_recipient_key ON feedback(recipient_key)",
+)
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,13 +60,26 @@ def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
-    if not _table_exists(connection, "items"):
-        return
-    existing_columns = {
-        row["name"]
-        for row in connection.execute("PRAGMA table_info(items)").fetchall()
-    }
-    for column_name, definition in ITEM_COLUMN_MIGRATIONS.items():
-        if column_name in existing_columns:
-            continue
-        connection.execute(f"ALTER TABLE items ADD COLUMN {column_name} {definition}")
+    if _table_exists(connection, "items"):
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(items)").fetchall()
+        }
+        for column_name, definition in ITEM_COLUMN_MIGRATIONS.items():
+            if column_name in existing_columns:
+                continue
+            connection.execute(f"ALTER TABLE items ADD COLUMN {column_name} {definition}")
+
+    if _table_exists(connection, "feedback"):
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(feedback)").fetchall()
+        }
+        for column_name, definition in FEEDBACK_COLUMN_MIGRATIONS.items():
+            if column_name in existing_columns:
+                continue
+            connection.execute(f"ALTER TABLE feedback ADD COLUMN {column_name} {definition}")
+
+    if _table_exists(connection, "feedback"):
+        for statement in POST_SCHEMA_STATEMENTS:
+            connection.execute(statement)

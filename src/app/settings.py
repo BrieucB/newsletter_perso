@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from string import Template
@@ -118,6 +119,9 @@ class EnvironmentConfig(BaseModel):
     newsletter_recipient: str | None = None
     newsletter_sender: str | None = None
     github_token: str | None = None
+    feedback_web_app_url: str | None = None
+    feedback_signing_secret: str | None = None
+    feedback_link_ttl_days: int = 90
 
     @classmethod
     def from_env(cls) -> EnvironmentConfig:
@@ -131,6 +135,9 @@ class EnvironmentConfig(BaseModel):
             newsletter_recipient=os.getenv("NEWSLETTER_RECIPIENT"),
             newsletter_sender=os.getenv("NEWSLETTER_SENDER"),
             github_token=os.getenv("GITHUB_TOKEN"),
+            feedback_web_app_url=os.getenv("FEEDBACK_WEB_APP_URL"),
+            feedback_signing_secret=os.getenv("FEEDBACK_SIGNING_SECRET"),
+            feedback_link_ttl_days=int(os.getenv("FEEDBACK_LINK_TTL_DAYS", "90")),
         )
 
 
@@ -178,6 +185,27 @@ class AppSettings(BaseModel):
     @property
     def gmail_token_path(self) -> Path:
         return self.project_root / self.env.gmail_token_file
+
+    @property
+    def feedback_enabled(self) -> bool:
+        return bool(self.env.feedback_web_app_url and self.env.feedback_signing_secret)
+
+    @property
+    def feedback_web_app_url(self) -> str | None:
+        return self.env.feedback_web_app_url
+
+    @property
+    def feedback_signing_secret(self) -> str | None:
+        return self.env.feedback_signing_secret
+
+    @property
+    def feedback_link_ttl_days(self) -> int:
+        return self.env.feedback_link_ttl_days
+
+    @property
+    def feedback_recipient_key(self) -> str:
+        normalized = self.recipient_email.strip().lower()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
     def resolve_repo_path(self, repo: LocalRepoConfig) -> Path:
         candidate = Path(repo.path)

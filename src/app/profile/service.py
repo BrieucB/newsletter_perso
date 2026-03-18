@@ -52,7 +52,7 @@ class ProfileService:
         )
         snapshot = self.profiles_repo.get_latest_profile_snapshot()
         if snapshot is None:
-            feedback_rows = self.feedback_repo.list_feedback_contexts()
+            feedback_rows = self.feedback_repo.list_effective_feedback_contexts()
             learned_preferences = learn_from_feedback(
                 feedback_rows,
                 adaptation_strength=explicit_profile.feedback_adaptation_strength,
@@ -87,7 +87,7 @@ class ProfileService:
 
         self.profiles_repo.replace_active_repo_profiles(repo_profiles)
         aggregated = aggregate_repo_profiles(repo_profiles)
-        feedback_rows = self.feedback_repo.list_feedback_contexts()
+        feedback_rows = self.feedback_repo.list_effective_feedback_contexts()
         learned = learn_from_feedback(
             feedback_rows,
             adaptation_strength=self.settings.explicit_profile.feedback_adaptation_strength,
@@ -114,7 +114,7 @@ class ProfileService:
             for row in self.profiles_repo.list_active_repo_profiles()
         ]
         aggregated = aggregate_repo_profiles(repo_profiles)
-        feedback_rows = self.feedback_repo.list_feedback_contexts()
+        feedback_rows = self.feedback_repo.list_effective_feedback_contexts()
         learned = learn_from_feedback(
             feedback_rows,
             adaptation_strength=self.settings.explicit_profile.feedback_adaptation_strength,

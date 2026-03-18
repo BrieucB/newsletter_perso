@@ -121,5 +121,8 @@ def build_test_settings(project_root: Path) -> AppSettings:
             newsletter_recipient="reader@example.com",
             newsletter_sender="sender@example.com",
             github_token="gh-token",
+            feedback_web_app_url="https://script.google.com/macros/s/test/exec",
+            feedback_signing_secret="feedback-secret",
+            feedback_link_ttl_days=90,
         ),
     )

@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     for command in ("run", "fetch", "score", "preview", "send", "init-db"):
         subparsers.add_parser(command)
+    subparsers.add_parser("feedback-sync")
     subparsers.add_parser("profile-refresh")
     subparsers.add_parser("profile-show")
     feedback_parser = subparsers.add_parser("feedback")
@@ -59,6 +60,10 @@ def main() -> None:
         if args.command == "profile-refresh":
             profile = pipeline.refresh_profiles()
             _print_json(profile)
+            return
+        if args.command == "feedback-sync":
+            inserted_count = pipeline.feedback_sync_only()
+            print(f"Imported {inserted_count} feedback events")
             return
         if args.command == "profile-show":
             _print_json(pipeline.show_profile())

@@ -65,6 +65,9 @@ cp config/local_repos.example.yaml config/local_repos.yaml
 - `NEWSLETTER_RECIPIENT`
 - `NEWSLETTER_SENDER`
 - `GITHUB_TOKEN` optional but recommended
+- `FEEDBACK_WEB_APP_URL` optional, enables one-click email feedback links
+- `FEEDBACK_SIGNING_SECRET` optional, required if feedback links are enabled
+- `FEEDBACK_LINK_TTL_DAYS` optional, defaults to `90`
 
 4. Check or edit personalization config:
 - `config/profile.yaml` for work priorities, LLM learning goals, tone, and feedback strength
@@ -142,6 +145,12 @@ python -m app.main feedback --item-id 46 --vote +
 python -m app.main feedback --item-id 52 --vote -
 ```
 
+Manually sync remote email-link feedback:
+
+```bash
+python -m app.main feedback-sync
+```
+
 Run the full pipeline and send email:
 
 ```bash
@@ -157,6 +166,11 @@ Source configuration lives in `config/sources.yaml`.
 Personalization configuration lives in:
 - `config/profile.yaml`
 - `config/local_repos.yaml`
+
+Email-feedback configuration lives in `.env`:
+- `FEEDBACK_WEB_APP_URL`
+- `FEEDBACK_SIGNING_SECRET`
+- `FEEDBACK_LINK_TTL_DAYS`
 
 Global settings include:
 - recipient and sender email
@@ -176,6 +190,27 @@ V0 ships with:
 - local repo profiling config for `Korali`, `Mirheo`, and `UQ_DPD`
 
 If a source does not expose a clean RSS feed in V0, leave it disabled or replace it with a working feed URL. The codebase is shaped so small custom collectors can be added later without changing the pipeline.
+
+## Email Feedback Links
+
+The newsletter can render one-click `+ good rec` and `- bad rec` links inside each item. These are plain HTTPS links, so they work in Gmail and do not require JavaScript.
+
+To enable them:
+
+1. Create a Google Sheet for feedback collection.
+2. Open Apps Script for that sheet.
+3. Paste the contents of [`google_apps_script_feedback.gs`](/Users/brieuc/Documents/1_work/5_newsletter/newsletter_v0/scripts/google_apps_script_feedback.gs).
+4. Replace `SHARED_SECRET` in the script with the same value you place in `.env` as `FEEDBACK_SIGNING_SECRET`.
+5. Deploy the Apps Script as a web app.
+6. Put the web app URL into `.env` as `FEEDBACK_WEB_APP_URL`.
+
+Behavior:
+- email clicks append raw events to the sheet
+- the local app imports them on the next `score`, `preview`, `run`, or `send`
+- `feedback-sync` lets you force the import manually
+- latest vote wins for learning, but raw history is preserved locally
+
+If feedback env vars are missing, the app omits the email feedback links and continues to support CLI feedback only.
 
 ## Cron
 

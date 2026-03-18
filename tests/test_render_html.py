@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.feedback.models import FeedbackRenderLinks
 from app.llm.schemas import NewsletterIssuePayload
 from app.render.html import render_issue_html, render_issue_text
 
@@ -31,11 +32,24 @@ def test_render_issue_html_contains_sections_and_links() -> None:
         }
     )
 
-    html = render_issue_html(issue, generated_at=datetime.now(tz=UTC))
-    text = render_issue_text(issue)
+    feedback_links = {
+        "1": FeedbackRenderLinks(
+            upvote_url="https://example.com/feedback/up",
+            downvote_url="https://example.com/feedback/down",
+        )
+    }
+    html = render_issue_html(
+        issue,
+        generated_at=datetime.now(tz=UTC),
+        feedback_links=feedback_links,
+    )
+    text = render_issue_text(issue, feedback_links=feedback_links)
 
     assert "A useful update" in html
     assert "Source link" in html
+    assert "+ good rec" in html
+    assert "- bad rec" in html
     assert "Why you should care:" in text
     assert "[both]" in text
+    assert "Feedback: + good rec https://example.com/feedback/up" in text
     assert "https://example.com/item" in text

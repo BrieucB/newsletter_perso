@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.db import connect
+from app.feedback.models import RemoteFeedbackEvent
 from app.llm.schemas import NewsletterIssuePayload
 from app.models import NormalizedItem
 from app.pipeline.run_once import NewsletterPipeline
@@ -170,6 +171,11 @@ class FakeLLMClient:
         )
 
 
+class FakeFeedbackSyncClient:
+    def fetch_events(self) -> list[RemoteFeedbackEvent]:
+        return []
+
+
 def test_pipeline_send_smoke(tmp_path: Path) -> None:
     settings = build_test_settings(tmp_path)
     sent_messages: list[dict[str, Any]] = []
@@ -182,6 +188,7 @@ def test_pipeline_send_smoke(tmp_path: Path) -> None:
         settings,
         connection=connect(settings.db_path),
         llm_client=FakeLLMClient(),
+        feedback_client=FakeFeedbackSyncClient(),
         gmail_sender=fake_gmail_sender,
         arxiv_collector=FakeArxivCollector(),  # type: ignore[arg-type]
         rss_collector=FakeRSSCollector(),  # type: ignore[arg-type]
@@ -193,6 +200,9 @@ def test_pipeline_send_smoke(tmp_path: Path) -> None:
     assert result.selected_count == 8
     assert result.preview_path is not None and result.preview_path.exists()
     assert len(sent_messages) == 1
+    assert "+ good rec" in sent_messages[0]["html_body"]
+    assert "payload=" in sent_messages[0]["html_body"]
+    assert "Feedback: + good rec" in sent_messages[0]["text_body"]
 
     issue_row = pipeline.connection.execute("SELECT status FROM issues LIMIT 1").fetchone()
     assert issue_row["status"] == "sent"

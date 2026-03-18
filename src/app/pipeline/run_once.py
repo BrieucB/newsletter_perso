@@ -16,6 +16,7 @@ from app.collectors.arxiv import ArxivCollector
 from app.collectors.github import GitHubCollector
 from app.collectors.rss import RSSCollector
 from app.db import connect, init_db
+from app.feedback.service import FeedbackService
 from app.llm.generate_issue import generate_issue_from_shortlist
 from app.llm.schemas import NewsletterIssuePayload
 from app.models import ItemFeatures, NormalizedItem, ShortlistCandidate, StoredItem
@@ -58,6 +59,7 @@ class NewsletterPipeline:
         connection: sqlite3.Connection | None = None,
         http_session: requests.Session | None = None,
         llm_client: Any | None = None,
+        feedback_client: Any | None = None,
         gmail_sender: Any | None = None,
         arxiv_collector: ArxivCollector | None = None,
         rss_collector: RSSCollector | None = None,
@@ -85,6 +87,14 @@ class NewsletterPipeline:
             session=self.http_session,
         )
         self.llm_client = llm_client
+        self.feedback_service = FeedbackService(
+            self.settings,
+            feedback_repo=self.feedback_repo,
+            items_repo=self.items_repo,
+            features_repo=self.features_repo,
+            client=feedback_client,
+            session=self.http_session,
+        )
         self.gmail_sender = gmail_sender or self._send_via_gmail
 
     def close(self) -> None:
@@ -222,6 +232,7 @@ class NewsletterPipeline:
         return fetched_count
 
     def score_candidates(self, logs: list[str]) -> ScoreCandidatesResult:
+        self.sync_feedback(logs, fail_on_error=False)
         candidate_items: list[StoredItem] = []
         for topic in ("uq_hpc", "llm"):
             candidate_items.extend(self.items_repo.list_recent_candidates(topic=topic, limit=400))
@@ -249,6 +260,22 @@ class NewsletterPipeline:
         logs.append("shortlists:" + json.dumps(shortlist_sizes, sort_keys=True))
         return shortlists, feature_updates
 
+    def _render_issue_html_for_issue(
+        self,
+        *,
+        issue_id: int,
+        issue_payload: NewsletterIssuePayload,
+    ) -> str:
+        feedback_links = self.feedback_service.build_issue_feedback_links(
+            issue_id=issue_id,
+            issue_payload=issue_payload,
+        )
+        return render_issue_html(
+            issue_payload,
+            generated_at=utc_now(),
+            feedback_links=feedback_links,
+        )
+
     def _create_issue_from_payload(
         self,
         *,
@@ -256,13 +283,12 @@ class NewsletterPipeline:
         subject: str,
         run_at: str,
     ) -> tuple[int, str]:
-        html_body = render_issue_html(issue_payload, generated_at=utc_now())
         issue_id = self.issues_repo.create_issue(
             run_at=run_at,
             subject=subject,
             model_name=self.settings.openai_model,
             status="drafted",
-            html_body=html_body,
+            html_body="",
             json_payload=issue_payload.model_dump(),
         )
         for section in issue_payload.sections:
@@ -285,6 +311,11 @@ class NewsletterPipeline:
                         sort_keys=True,
                     ),
                 )
+        html_body = self._render_issue_html_for_issue(
+            issue_id=issue_id,
+            issue_payload=issue_payload,
+        )
+        self.issues_repo.update_html_body(issue_id, html_body=html_body)
         self.connection.commit()
         return issue_id, html_body
 
@@ -305,11 +336,21 @@ class NewsletterPipeline:
             except ValidationError:
                 logs.append(f"issue:stale-format:{existing_issue['id']}")
             else:
+                existing_status = str(existing_issue["status"])
+                issue_id = int(existing_issue["id"])
+                html_body = str(existing_issue["html_body"])
+                if self.settings.feedback_enabled:
+                    html_body = self._render_issue_html_for_issue(
+                        issue_id=issue_id,
+                        issue_payload=issue_payload,
+                    )
+                    if existing_status == "drafted":
+                        self.issues_repo.update_html_body(issue_id, html_body=html_body)
                 logs.append(f"issue:reused:{existing_issue['id']}:{existing_issue['status']}")
                 return (
-                    int(existing_issue["id"]),
+                    issue_id,
                     issue_payload,
-                    str(existing_issue["html_body"]),
+                    html_body,
                     True,
                 )
 
@@ -336,6 +377,16 @@ class NewsletterPipeline:
         return preview_path
 
     def _send_issue_email(self, *, issue_payload: NewsletterIssuePayload, html_body: str) -> None:
+        issue_row = self.issues_repo.get_by_subject(issue_payload.subject)
+        issue_id = int(issue_row["id"]) if issue_row is not None else None
+        feedback_links = (
+            self.feedback_service.build_issue_feedback_links(
+                issue_id=issue_id,
+                issue_payload=issue_payload,
+            )
+            if issue_id is not None
+            else {}
+        )
         self.gmail_sender(
             client_secret_file=self.settings.gmail_client_secret_path,
             token_file=self.settings.gmail_token_path,
@@ -343,8 +394,24 @@ class NewsletterPipeline:
             recipient=self.settings.recipient_email,
             subject=issue_payload.subject,
             html_body=html_body,
-            text_body=render_issue_text(issue_payload),
+            text_body=render_issue_text(issue_payload, feedback_links=feedback_links),
         )
+
+    def sync_feedback(self, logs: list[str], *, fail_on_error: bool) -> int:
+        try:
+            inserted_count = self.feedback_service.sync_remote_feedback()
+        except Exception as exc:
+            logs.append(f"feedback_sync:error:{exc}")
+            logger.warning("Feedback sync failed", exc_info=exc)
+            if fail_on_error:
+                raise
+            return 0
+
+        if inserted_count:
+            self.profile_service.rebuild_snapshot_from_feedback()
+            self.connection.commit()
+        logs.append(f"feedback_sync:{inserted_count}")
+        return inserted_count
 
     def fetch_only(self) -> PipelineResult:
         self.initialize()
@@ -539,6 +606,13 @@ class NewsletterPipeline:
         self.initialize()
         return self.profile_service.describe_context()
 
+    def feedback_sync_only(self) -> int:
+        self.initialize()
+        logs: list[str] = []
+        inserted_count = self.sync_feedback(logs, fail_on_error=True)
+        self.connection.commit()
+        return inserted_count
+
     def record_feedback(self, *, item_id: int, vote: str) -> int:
         self.initialize()
         item = self.items_repo.get_item(item_id)
@@ -552,12 +626,16 @@ class NewsletterPipeline:
             issue_id=int(issue_context["issue_id"]),
             item_id=item_id,
             vote=vote,
+            channel="cli",
+            recipient_key=self.settings.feedback_recipient_key,
             context_json={
                 "source_name": item.source_name,
                 "topic": item.topic,
                 "content_type": item.content_type,
                 "fit_tag": item.fit_tag,
                 "section_name": issue_context["section_name"],
+                "source_url": item.url,
+                "item_title": item.title,
                 "feature_snapshot": (
                     feature_snapshot.model_dump(mode="json") if feature_snapshot else {}
                 ),

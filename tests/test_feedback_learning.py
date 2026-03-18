@@ -59,6 +59,9 @@ def test_feedback_write_read_and_learning(tmp_path: Path) -> None:
         issue_id=issue_id,
         item_id=item_id,
         vote="+",
+        channel="cli",
+        recipient_key="reader-key",
+        external_event_id="event-1",
         context_json={
             "source_name": "OpenAI News",
             "topic": "llm",
@@ -78,6 +81,9 @@ def test_feedback_write_read_and_learning(tmp_path: Path) -> None:
         issue_id=issue_id,
         item_id=item_id,
         vote="-",
+        channel="email_link",
+        recipient_key="reader-key",
+        external_event_id="event-2",
         context_json={
             "source_name": "Generic Source",
             "topic": "llm",
@@ -95,14 +101,14 @@ def test_feedback_write_read_and_learning(tmp_path: Path) -> None:
     )
 
     feedback_rows = repository.list_feedback_contexts()
-    preferences = learn_from_feedback(feedback_rows, adaptation_strength=0.2)
+    effective_feedback_rows = repository.list_effective_feedback_contexts()
+    preferences = learn_from_feedback(effective_feedback_rows, adaptation_strength=0.2)
 
     assert len(feedback_rows) == 2
-    assert feedback_rows[0].source_name == "OpenAI News"
-    assert preferences.source_weights["OpenAI News"] == 0.2
+    assert len(effective_feedback_rows) == 1
+    assert effective_feedback_rows[0].vote == "-"
     assert preferences.source_weights["Generic Source"] == -0.2
-    assert preferences.content_type_weights["engineering_blog"] == 0.2
-    assert preferences.fit_tag_weights["both"] == 0.2
-    assert "both" in preferences.positive_patterns
+    assert preferences.content_type_weights["other"] == -0.2
+    assert preferences.fit_tag_weights["llm_background"] == -0.2
     assert "llm_background" in preferences.negative_patterns
-    assert preferences.feature_weight_adjustments["practical_reusability_score"] > 0
+    assert preferences.feature_weight_adjustments["practical_reusability_score"] < 0

@@ -127,6 +127,9 @@ CREATE TABLE IF NOT EXISTS feedback (
     issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     vote TEXT NOT NULL,
+    external_event_id TEXT,
+    channel TEXT NOT NULL DEFAULT 'cli',
+    recipient_key TEXT,
     context_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -142,3 +145,6 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON pipeline_runs(status);
 CREATE INDEX IF NOT EXISTS idx_repo_profiles_active ON repo_profiles(is_active);
 CREATE INDEX IF NOT EXISTS idx_feedback_issue_id ON feedback(issue_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_item_id ON feedback(item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_external_event_id ON feedback(external_event_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_channel ON feedback(channel);
+CREATE INDEX IF NOT EXISTS idx_feedback_recipient_key ON feedback(recipient_key);
