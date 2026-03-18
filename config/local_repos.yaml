@@ -1,0 +1,27 @@
+repos:
+  - name: Korali
+    path: repo_cache/Korali
+    clone_url: git@github.com:BrieucB/korali.git
+    enabled: true
+  - name: Mirheo
+    path: repo_cache/Mirheo
+    clone_url: git@github.com:cselab/Mirheo.git
+    enabled: true
+  - name: UQ_DPD
+    path: repo_cache/UQ_DPD
+    clone_url: git@github.com:BrieucB/UQ_DPD.git
+    enabled: true
+
+ignore_dirs:
+  - .git
+  - .venv
+  - build
+  - dist
+  - node_modules
+
+ignore_file_globs:
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.pdf"
+  - "*.parquet"

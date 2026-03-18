@@ -1,13 +1,17 @@
 # newsletter_v0
 
-`newsletter_v0` is a local-first Python service that collects UQ/HPC and LLM news, stores everything in SQLite, ranks candidates with deterministic rules, uses one OpenAI call to produce a structured newsletter edition, renders simple HTML, and sends it directly through Gmail API.
+`newsletter_v0` is now a local-first personalized technical radar. It still collects UQ/HPC and LLM news, stores everything in SQLite, uses one OpenAI call per edition, renders simple HTML, and sends through Gmail API, but V1 adds explicit profile-driven ranking, local repo profiling, and lightweight feedback learning.
 
-The V0 is optimized for speed of delivery:
+The project is still optimized for pragmatic local use:
 - Python 3.12, SQLite, YAML config, `.env` secrets
 - arXiv + GitHub + RSS collectors
 - one structured OpenAI generation call per edition
 - direct Gmail send, no draft mode
 - short HTML output designed for a 5-minute read
+- exactly 8 items per issue
+- 50/50 balance between current-work relevance and LLM background
+- repo-aware personalization from local clones of `Korali`, `Mirheo`, and `UQ_DPD`
+- adaptive ranking from simple `+` / `-` feedback
 
 ## Architecture
 
@@ -15,18 +19,19 @@ Pipeline steps:
 1. Fetch candidates from configured sources.
 2. Normalize into one internal Pydantic model.
 3. Deduplicate by URL, normalized title, and content hash.
-4. Compute deterministic pre-scores.
+4. Compute deterministic personalized features and pre-scores.
 5. Shortlist top candidates per topic.
 6. Make one OpenAI call to rerank, select, and write newsletter content as strict JSON.
 7. Render HTML and text.
 8. Send via Gmail API.
-9. Persist items, issues, issue-item links, and pipeline run logs in SQLite.
+9. Persist items, feature snapshots, issues, issue-item links, repo profiles, feedback, and pipeline logs in SQLite.
 
 Key folders:
 - `src/app/collectors/`: arXiv, RSS, GitHub collectors
 - `src/app/repositories/`: SQLite persistence
 - `src/app/ranking/`: deterministic scoring and shortlist logic
 - `src/app/llm/`: prompt, schema, OpenAI client, issue generation
+- `src/app/profile/`: explicit profile, repo profiling, feedback learning
 - `src/app/render/`: HTML + text rendering
 - `src/app/email/`: Gmail OAuth and send
 - `src/app/pipeline/`: orchestration
@@ -48,6 +53,8 @@ pip install -e ".[dev]"
 ```bash
 cp .env.example .env
 cp config/sources.example.yaml config/sources.yaml
+cp config/profile.example.yaml config/profile.yaml
+cp config/local_repos.example.yaml config/local_repos.yaml
 ```
 
 3. Fill in `.env`:
@@ -58,6 +65,10 @@ cp config/sources.example.yaml config/sources.yaml
 - `NEWSLETTER_RECIPIENT`
 - `NEWSLETTER_SENDER`
 - `GITHUB_TOKEN` optional but recommended
+
+4. Check or edit personalization config:
+- `config/profile.yaml` for work priorities, LLM learning goals, tone, and feedback strength
+- `config/local_repos.yaml` for local repo paths or clone targets
 
 ## Gmail OAuth
 
@@ -106,6 +117,31 @@ Run the full pipeline without sending:
 python -m app.main run
 ```
 
+Refresh repo profiles:
+
+```bash
+python -m app.main profile-refresh
+```
+
+Show the active personalization context:
+
+```bash
+python -m app.main profile-show
+```
+
+Explain why the latest issue selected certain items:
+
+```bash
+python -m app.main issue-explain --issue-id 2
+```
+
+Record feedback:
+
+```bash
+python -m app.main feedback --item-id 46 --vote +
+python -m app.main feedback --item-id 52 --vote -
+```
+
 Run the full pipeline and send email:
 
 ```bash
@@ -117,6 +153,10 @@ python -m app.main send
 ## Configuration
 
 Source configuration lives in `config/sources.yaml`.
+
+Personalization configuration lives in:
+- `config/profile.yaml`
+- `config/local_repos.yaml`
 
 Global settings include:
 - recipient and sender email
@@ -132,6 +172,8 @@ V0 ships with:
 - tracked GitHub repos for `vllm`, `llama.cpp`, `dspy`, and `litellm`
 - GitHub repository search queries for LLM tooling topics
 - example RSS feeds for OpenAI, Anthropic, and Hugging Face
+- default explicit profile tuned toward HPC/GPU, calibration, surrogate modeling, Bayesian inference, and LLM ecosystem mapping
+- local repo profiling config for `Korali`, `Mirheo`, and `UQ_DPD`
 
 If a source does not expose a clean RSS feed in V0, leave it disabled or replace it with a working feed URL. The codebase is shaped so small custom collectors can be added later without changing the pipeline.
 
@@ -149,12 +191,13 @@ The send pipeline is idempotent enough for retries:
 - duplicates already sent are excluded by rules
 - the same-day edition subject is reused if it already exists
 - a previously drafted same-day issue is reused instead of making another LLM call
+- repo profiles and learned preferences are reused across runs
 
 ## Quality Checks
 
 ```bash
 ruff check .
-mypy src
+mypy src tests
 pytest
 ```
 
@@ -162,8 +205,9 @@ GitHub Actions runs the same checks on push and pull request.
 
 ## Future Improvements
 
-- add small migration files instead of a single schema bootstrap
+- add explicit schema migration files instead of bootstrap-style upgrades
 - support more official feeds and custom page scrapers
 - add richer scoring features and explicit LLM confidence
 - add retry/backoff and structured observability
 - split storage and execution layers for an easier server deployment
+- add better issue comparison across days and feedback summaries

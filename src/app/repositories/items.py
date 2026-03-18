@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
-from app.models import NormalizedItem, StoredItem
+from app.models import ItemFeatures, NormalizedItem, StoredItem
 from app.utils.text import url_domain
 from app.utils.time import parse_iso8601, to_iso8601, utc_now
 
@@ -224,6 +224,38 @@ class ItemsRepository:
                 (score, now, item_id),
             )
 
+    def update_personalization_fields(
+        self,
+        *,
+        features_by_item_id: dict[int, ItemFeatures],
+        score_updates: dict[int, float],
+    ) -> None:
+        now = utc_now().isoformat()
+        for item_id, features in features_by_item_id.items():
+            self.connection.execute(
+                """
+                UPDATE items
+                SET content_type = ?,
+                    fit_tag = ?,
+                    relevance_for_work = ?,
+                    relevance_for_llm_learning = ?,
+                    applicability_score = ?,
+                    deterministic_score = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    features.content_type,
+                    features.fit_tag,
+                    features.work_relevance_score,
+                    features.llm_map_value_score,
+                    features.practical_reusability_score,
+                    score_updates[item_id],
+                    now,
+                    item_id,
+                ),
+            )
+
     def recent_sent_titles(self) -> set[str]:
         rows = self.connection.execute(
             """
@@ -256,6 +288,41 @@ class ItemsRepository:
         ).fetchall()
         return [_row_to_item(row) for row in rows]
 
+    def get_item(self, item_id: int) -> StoredItem | None:
+        row = self.connection.execute(
+            "SELECT * FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        return _row_to_item(row) if row else None
+
+    def get_latest_issue_context_for_item(self, item_id: int) -> sqlite3.Row | None:
+        return cast(
+            sqlite3.Row | None,
+            self.connection.execute(
+                """
+                SELECT ii.issue_id, ii.section_name, iss.subject, iss.status
+                FROM issue_items AS ii
+                JOIN issues AS iss ON iss.id = ii.issue_id
+                WHERE ii.item_id = ?
+                ORDER BY ii.id DESC
+                LIMIT 1
+                """,
+                (item_id,),
+            ).fetchone(),
+        )
+
+    def list_issue_items(self, issue_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT ii.section_name, ii.rank_in_section, i.*
+            FROM issue_items AS ii
+            JOIN items AS i ON i.id = ii.item_id
+            WHERE ii.issue_id = ?
+            ORDER BY ii.section_name ASC, ii.rank_in_section ASC
+            """,
+            (issue_id,),
+        ).fetchall()
+
     def attach_generated_content(
         self,
         *,
@@ -265,6 +332,8 @@ class ItemsRepository:
         item_id: int,
         generated_summary: str,
         generated_why_it_matters: str,
+        fit_tag: str,
+        selection_reason_json: str,
     ) -> None:
         self.connection.execute(
             """
@@ -280,9 +349,21 @@ class ItemsRepository:
                 issue_id = ?,
                 generated_summary = ?,
                 generated_why_it_matters = ?,
+                why_you_should_care_generated = ?,
+                fit_tag = ?,
+                selection_reason_json = ?,
                 final_score = COALESCE(llm_score, deterministic_score),
                 updated_at = ?
             WHERE id = ?
             """,
-            (issue_id, generated_summary, generated_why_it_matters, utc_now().isoformat(), item_id),
+            (
+                issue_id,
+                generated_summary,
+                generated_why_it_matters,
+                generated_why_it_matters,
+                fit_tag,
+                selection_reason_json,
+                utc_now().isoformat(),
+                item_id,
+            ),
         )

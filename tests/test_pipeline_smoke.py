@@ -2,123 +2,179 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from app.db import connect
 from app.llm.schemas import NewsletterIssuePayload
+from app.models import NormalizedItem
 from app.pipeline.run_once import NewsletterPipeline
 from tests.conftest import build_test_settings
 
 
 class FakeArxivCollector:
-    def fetch_query(self, *, query: str, max_results: int, source_name: str):
+    def fetch_query(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        source_name: str,
+    ) -> list[NormalizedItem]:
         return [
-            {
-                "topic": "uq_hpc",
-                "source_kind": "arxiv",
-                "source_name": source_name,
-                "external_id": "arxiv-1",
-                "title": "Simulation-based inference accelerates calibration",
-                "url": "https://arxiv.org/abs/1",
-                "authors": ["A"],
-                "published_at": datetime.now(tz=UTC),
-                "raw_summary": "Recent paper on calibration.",
-                "raw_payload": {"query": query},
-                "tags": ["uq"],
-            }
+            NormalizedItem(
+                topic="uq_hpc",
+                source_kind="arxiv",
+                source_name=source_name,
+                external_id=f"arxiv-{index}",
+                title=f"Simulation-based inference pattern {index} accelerates calibration",
+                url=f"https://arxiv.org/abs/{index}",
+                authors=["A"],
+                published_at=datetime.now(tz=UTC),
+                raw_summary=(
+                    "Recent paper on calibration, surrogate modeling, "
+                    "and GPU workflows."
+                ),
+                raw_payload={"query": query},
+                tags=["uq"],
+            )
+            for index in range(1, 5)
         ]
 
 
 class FakeRSSCollector:
-    def fetch_feed(self, *, source_name: str, feed_url: str, topic: str, max_results: int):
+    def fetch_feed(
+        self,
+        *,
+        source_name: str,
+        feed_url: str,
+        topic: str,
+        max_results: int,
+    ) -> list[NormalizedItem]:
         return [
-            {
-                "topic": "llm",
-                "source_kind": "rss",
-                "source_name": source_name,
-                "external_id": "rss-1",
-                "title": "OpenAI adds a new eval workflow",
-                "url": "https://example.com/rss",
-                "authors": [],
-                "published_at": datetime.now(tz=UTC),
-                "raw_summary": "Official workflow update.",
-                "raw_payload": {"feed_url": feed_url},
-                "tags": ["evals"],
-            }
+            NormalizedItem(
+                topic="llm",
+                source_kind="rss",
+                source_name=source_name,
+                external_id=f"rss-{index}",
+                title=f"OpenAI adds eval workflow {index}",
+                url=f"https://example.com/rss/{index}",
+                authors=[],
+                published_at=datetime.now(tz=UTC),
+                raw_summary=(
+                    "Official workflow update with architecture and "
+                    "serving implications."
+                ),
+                raw_payload={"feed_url": feed_url},
+                tags=["evals"],
+            )
+            for index in range(1, 3)
         ]
 
 
 class FakeGitHubCollector:
-    def fetch_tracked_repo(self, *, repo: str, topic: str):
+    def fetch_tracked_repo(self, *, repo: str, topic: str) -> list[NormalizedItem]:
         return [
-            {
-                "topic": "llm",
-                "source_kind": "github_repo",
-                "source_name": repo,
-                "external_id": "repo-1",
-                "title": f"{repo} released v1.0.0",
-                "url": f"https://github.com/{repo}/releases/tag/v1.0.0",
-                "authors": ["maintainer"],
-                "published_at": datetime.now(tz=UTC),
-                "raw_summary": "New release.",
-                "raw_payload": {"repo": repo},
-                "tags": ["release"],
-            }
+            NormalizedItem(
+                topic="llm",
+                source_kind="github_repo",
+                source_name=repo,
+                external_id="repo-1",
+                title=f"{repo} released v1.0.0",
+                url=f"https://github.com/{repo}/releases/tag/v1.0.0",
+                authors=["maintainer"],
+                published_at=datetime.now(tz=UTC),
+                raw_summary="New release with serving and architecture trade-off notes.",
+                raw_payload={"repo": repo, "stargazers_count": 32000, "forks_count": 4200},
+                tags=["release"],
+            )
         ]
 
-    def fetch_search(self, *, name: str, query: str, topic: str, max_results: int):
-        return []
+    def fetch_search(
+        self,
+        *,
+        name: str,
+        query: str,
+        topic: str,
+        max_results: int,
+    ) -> list[NormalizedItem]:
+        return [
+            NormalizedItem(
+                topic="llm",
+                source_kind="github_search",
+                source_name=name,
+                external_id="search-1",
+                title="RAG evaluation benchmark repo compares architecture trade-offs",
+                url="https://github.com/example/rag-eval",
+                authors=["maintainer"],
+                published_at=datetime.now(tz=UTC),
+                raw_summary="Repository benchmark with evaluation workflow details.",
+                raw_payload={"query": query, "stargazers_count": 1800, "forks_count": 120},
+                tags=["repo"],
+            )
+        ]
 
 
 class FakeLLMClient:
     def generate(self, *, system_prompt: str, user_prompt: str) -> NewsletterIssuePayload:
         payload = json.loads(user_prompt)
-        uq_candidate = next(
+        uq_candidates = [
             candidate for candidate in payload["candidates"] if candidate["topic"] == "uq_hpc"
-        )
-        llm_candidate = next(
+        ]
+        llm_candidates = [
             candidate for candidate in payload["candidates"] if candidate["topic"] == "llm"
-        )
+        ]
         return NewsletterIssuePayload.model_validate(
             {
                 "subject": "will be overridden",
                 "intro": "Two short paragraphs on the week.",
                 "sections": [
                     {
-                        "name": "UQ / HPC",
+                        "name": "Most relevant for your work",
                         "items": [
                             {
-                                "candidate_id": uq_candidate["candidate_id"],
-                                "title": uq_candidate["title"],
-                                "summary": "Short UQ summary.",
-                                "why_it_matters": "It sharpens calibration workflows.",
-                                "source_name": uq_candidate["source_name"],
-                                "source_url": uq_candidate["source_url"],
+                                "candidate_id": candidate["candidate_id"],
+                                "title": candidate["title"],
+                                "what_happened": "Short UQ summary.",
+                                "why_you_should_care": (
+                                    "It sharpens calibration and surrogate workflow choices."
+                                ),
+                                "fit_tag": "current_work",
+                                "source_name": candidate["source_name"],
+                                "source_url": candidate["source_url"],
                             }
+                            for candidate in uq_candidates
                         ],
                     },
                     {
-                        "name": "LLM",
+                        "name": "LLM engineering you should understand",
                         "items": [
                             {
-                                "candidate_id": llm_candidate["candidate_id"],
-                                "title": llm_candidate["title"],
-                                "summary": "Short LLM summary.",
-                                "why_it_matters": "It affects production stack choices.",
-                                "source_name": llm_candidate["source_name"],
-                                "source_url": llm_candidate["source_url"],
+                                "candidate_id": candidate["candidate_id"],
+                                "title": candidate["title"],
+                                "what_happened": "Short LLM summary.",
+                                "why_you_should_care": (
+                                    "It improves your understanding of serving and eval trade-offs."
+                                ),
+                                "fit_tag": "llm_background",
+                                "source_name": candidate["source_name"],
+                                "source_url": candidate["source_url"],
                             }
+                            for candidate in llm_candidates
                         ],
                     },
+                ],
+                "selection_notes": [
+                    "Balanced work-relevant UQ/HPC items with LLM ecosystem mapping."
                 ],
             }
         )
 
 
-def test_pipeline_send_smoke(tmp_path) -> None:
+def test_pipeline_send_smoke(tmp_path: Path) -> None:
     settings = build_test_settings(tmp_path)
-    sent_messages: list[dict[str, str]] = []
+    sent_messages: list[dict[str, Any]] = []
 
-    def fake_gmail_sender(**kwargs):
+    def fake_gmail_sender(**kwargs: Any) -> dict[str, str]:
         sent_messages.append(kwargs)
         return {"id": "msg-1"}
 
@@ -131,19 +187,10 @@ def test_pipeline_send_smoke(tmp_path) -> None:
         rss_collector=FakeRSSCollector(),  # type: ignore[arg-type]
         github_collector=FakeGitHubCollector(),  # type: ignore[arg-type]
     )
-
-    original_persist = pipeline._persist_item
-
-    def persist_from_dict(item_dict):
-        from app.models import NormalizedItem
-
-        return original_persist(NormalizedItem.model_validate(item_dict))
-
-    pipeline._persist_item = persist_from_dict  # type: ignore[method-assign]
     result = pipeline.run(send_email=True)
 
     assert result.status == "sent"
-    assert result.selected_count == 2
+    assert result.selected_count == 8
     assert result.preview_path is not None and result.preview_path.exists()
     assert len(sent_messages) == 1
 

@@ -11,6 +11,7 @@ def test_render_issue_html_contains_sections_and_links() -> None:
         {
             "subject": "Briefing | 2026-03-18",
             "intro": "Short intro.",
+            "selection_notes": ["Balanced current-work and LLM-background items."],
             "sections": [
                 {
                     "name": "LLM",
@@ -18,8 +19,9 @@ def test_render_issue_html_contains_sections_and_links() -> None:
                         {
                             "candidate_id": "1",
                             "title": "A useful update",
-                            "summary": "Two short sentences.",
-                            "why_it_matters": "It changes deployment choices.",
+                            "what_happened": "Two short sentences.",
+                            "why_you_should_care": "It changes deployment choices.",
+                            "fit_tag": "both",
                             "source_name": "OpenAI News",
                             "source_url": "https://example.com/item",
                         }
@@ -34,5 +36,6 @@ def test_render_issue_html_contains_sections_and_links() -> None:
 
     assert "A useful update" in html
     assert "Source link" in html
-    assert "Why it matters:" in text
+    assert "Why you should care:" in text
+    assert "[both]" in text
     assert "https://example.com/item" in text

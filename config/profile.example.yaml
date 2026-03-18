@@ -1,0 +1,52 @@
+work_priorities:
+  - HPC / GPU
+  - calibration
+  - surrogate modeling
+  - Bayesian inference
+  - coupling multi-scale / multi-physics
+
+llm_learning_goals:
+  - architecture trade-offs
+  - major players / tools / standards
+  - engineering perspective
+  - product/system understanding
+  - interview-level technical background
+
+preferred_content_types:
+  - engineering_blog
+  - tool_or_repo
+  - paper
+  - release_note
+
+avoid_content:
+  - linkedin_marketing_style
+  - overly_theoretical_without_applied_angle
+  - tiny_low-traction_open_source
+
+tone: mentor_note_to_self
+
+target_ratio:
+  current_work: 0.5
+  llm_background: 0.5
+
+desired_effects:
+  - I should try this in my project
+  - this could be a direction worth exploring
+  - this improves my LLM technical background
+
+feedback_adaptation_strength: 0.2
+
+repo_profiling:
+  enabled: true
+  ignore_dirs:
+    - .git
+    - .venv
+    - build
+    - dist
+    - node_modules
+  ignore_file_globs:
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.pdf"
+    - "*.parquet"

@@ -25,15 +25,21 @@ def render_issue_html(issue: NewsletterIssuePayload, *, generated_at: datetime) 
 
 def render_issue_text(issue: NewsletterIssuePayload) -> str:
     lines = [issue.subject, "", issue.intro, ""]
+    if issue.selection_notes:
+        lines.append("Selection notes")
+        lines.append("----------------")
+        for note in issue.selection_notes:
+            lines.append(f"- {note}")
+        lines.append("")
     for section in issue.sections:
         if not section.items:
             continue
         lines.append(section.name)
         lines.append("-" * len(section.name))
         for item in section.items:
-            lines.append(item.title)
-            lines.append(item.summary)
-            lines.append(f"Why it matters: {item.why_it_matters}")
+            lines.append(f"{item.title} [{item.fit_tag}]")
+            lines.append(item.what_happened)
+            lines.append(f"Why you should care: {item.why_you_should_care}")
             lines.append(f"Source: {item.source_name} - {item.source_url}")
             lines.append("")
     return "\n".join(lines).strip() + "\n"

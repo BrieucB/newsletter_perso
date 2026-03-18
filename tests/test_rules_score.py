@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.models import StoredItem
 from app.ranking.rules import compute_rule_score
+from tests.conftest import build_test_profile_context
 
 
 def _stored_item(
@@ -56,12 +57,14 @@ def test_compute_rule_score_prefers_fresh_keyword_rich_items() -> None:
 
     strong_score = compute_rule_score(
         strong,
+        context=build_test_profile_context(),
         sent_titles=set(),
         sent_domain_titles=set(),
         title_frequency={strong.normalized_title: 1, weak.normalized_title: 1},
     )
     weak_score = compute_rule_score(
         weak,
+        context=build_test_profile_context(),
         sent_titles=set(),
         sent_domain_titles=set(),
         title_frequency={strong.normalized_title: 1, weak.normalized_title: 1},
@@ -69,6 +72,9 @@ def test_compute_rule_score_prefers_fresh_keyword_rich_items() -> None:
 
     assert strong_score.excluded is False
     assert strong_score.score > weak_score.score
+    assert strong_score.features is not None
+    assert strong_score.features.fit_tag == "llm_background"
+    assert strong_score.features.content_type == "engineering_blog"
 
 
 def test_compute_rule_score_excludes_exact_sent_titles() -> None:
@@ -82,6 +88,7 @@ def test_compute_rule_score_excludes_exact_sent_titles() -> None:
 
     score = compute_rule_score(
         item,
+        context=build_test_profile_context(),
         sent_titles={item.normalized_title},
         sent_domain_titles=set(),
         title_frequency={item.normalized_title: 1},

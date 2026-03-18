@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.db import connect, init_db
 from app.models import NormalizedItem
 from app.repositories.items import ItemsRepository
@@ -7,7 +9,7 @@ from app.utils.hashing import stable_hash
 from app.utils.text import normalize_title
 
 
-def test_upsert_normalized_item_deduplicates_by_normalized_title(tmp_path) -> None:
+def test_upsert_normalized_item_deduplicates_by_normalized_title(tmp_path: Path) -> None:
     db_path = tmp_path / "test.sqlite3"
     init_db(db_path)
     connection = connect(db_path)

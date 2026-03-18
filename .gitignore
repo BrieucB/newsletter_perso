@@ -10,3 +10,5 @@ oauth_client_secret.json
 preview/
 data/
 *.sqlite3
+repo_cache/
+.DS_Store

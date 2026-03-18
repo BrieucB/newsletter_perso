@@ -31,8 +31,7 @@ def normalize_repo_release(
         source_kind="github_repo",
         source_name=source_name,
         external_id=(
-            f"release:{repo}:"
-            f"{release_payload.get('id', release_payload.get('tag_name', 'latest'))}"
+            f"release:{repo}:{release_payload.get('id', release_payload.get('tag_name', 'latest'))}"
         ),
         title=f"{repo} released {name}",
         url=str(release_payload.get("html_url") or f"https://github.com/{repo}/releases"),

@@ -6,10 +6,11 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import requests
+from pydantic import ValidationError
 
 from app.collectors.arxiv import ArxivCollector
 from app.collectors.github import GitHubCollector
@@ -17,11 +18,16 @@ from app.collectors.rss import RSSCollector
 from app.db import connect, init_db
 from app.llm.generate_issue import generate_issue_from_shortlist
 from app.llm.schemas import NewsletterIssuePayload
-from app.models import NormalizedItem, ShortlistCandidate, StoredItem
+from app.models import ItemFeatures, NormalizedItem, ShortlistCandidate, StoredItem
+from app.profile.models import RuntimeProfileContext
+from app.profile.service import ProfileService
 from app.ranking.shortlist import score_and_shortlist
 from app.render.html import render_issue_html, render_issue_text
+from app.repositories.features import FeaturesRepository
+from app.repositories.feedback import FeedbackRepository
 from app.repositories.issues import IssuesRepository
 from app.repositories.items import ItemsRepository
+from app.repositories.profiles import ProfilesRepository
 from app.repositories.runs import PipelineRunsRepository
 from app.settings import AppSettings
 from app.utils.hashing import stable_hash
@@ -29,6 +35,7 @@ from app.utils.text import normalize_title
 from app.utils.time import utc_now
 
 logger = logging.getLogger(__name__)
+ScoreCandidatesResult = tuple[dict[str, list[ShortlistCandidate]], dict[int, ItemFeatures]]
 
 
 @dataclass
@@ -61,8 +68,16 @@ class NewsletterPipeline:
         self.connection = connection or connect(settings.db_path)
         self.http_session = http_session or requests.Session()
         self.items_repo = ItemsRepository(self.connection)
+        self.features_repo = FeaturesRepository(self.connection)
         self.issues_repo = IssuesRepository(self.connection)
         self.runs_repo = PipelineRunsRepository(self.connection)
+        self.profiles_repo = ProfilesRepository(self.connection)
+        self.feedback_repo = FeedbackRepository(self.connection)
+        self.profile_service = ProfileService(
+            self.settings,
+            profiles_repo=self.profiles_repo,
+            feedback_repo=self.feedback_repo,
+        )
         self.arxiv_collector = arxiv_collector or ArxivCollector(session=self.http_session)
         self.rss_collector = rss_collector or RSSCollector(session=self.http_session)
         self.github_collector = github_collector or GitHubCollector(
@@ -99,6 +114,7 @@ class NewsletterPipeline:
 
     def initialize(self) -> None:
         init_db(self.settings.db_path)
+        self.profile_service.ensure_explicit_profile()
 
     def _edition_subject(self) -> str:
         tz = ZoneInfo(self.settings.global_config.timezone)
@@ -205,7 +221,7 @@ class NewsletterPipeline:
             raise RuntimeError("All collectors failed or returned no items.")
         return fetched_count
 
-    def score_candidates(self, logs: list[str]) -> dict[str, list[ShortlistCandidate]]:
+    def score_candidates(self, logs: list[str]) -> ScoreCandidatesResult:
         candidate_items: list[StoredItem] = []
         for topic in ("uq_hpc", "llm"):
             candidate_items.extend(self.items_repo.list_recent_candidates(topic=topic, limit=400))
@@ -213,17 +229,25 @@ class NewsletterPipeline:
         if not candidate_items:
             raise RuntimeError("No candidate items available to score.")
 
-        score_updates, shortlists = score_and_shortlist(
+        profile_context = self.profile_service.load_runtime_context()
+        score_updates, feature_updates, shortlists = score_and_shortlist(
             candidate_items,
+            context=profile_context,
             sent_titles=self.items_repo.recent_sent_titles(),
             sent_domain_titles=self.items_repo.recent_sent_domain_titles(),
             max_per_topic=self.settings.global_config.max_shortlist_per_topic,
         )
         self.items_repo.update_scores(score_updates)
+        self.items_repo.update_personalization_fields(
+            features_by_item_id=feature_updates,
+            score_updates=score_updates,
+        )
+        for features in feature_updates.values():
+            self.features_repo.upsert_item_features(features)
         self.connection.commit()
         shortlist_sizes = {topic: len(candidates) for topic, candidates in shortlists.items()}
         logs.append("shortlists:" + json.dumps(shortlist_sizes, sort_keys=True))
-        return shortlists
+        return shortlists, feature_updates
 
     def _create_issue_from_payload(
         self,
@@ -248,8 +272,18 @@ class NewsletterPipeline:
                     section_name=section.name,
                     rank_in_section=rank,
                     item_id=int(item.candidate_id),
-                    generated_summary=item.summary,
-                    generated_why_it_matters=item.why_it_matters,
+                    generated_summary=item.what_happened,
+                    generated_why_it_matters=item.why_you_should_care,
+                    fit_tag=item.fit_tag,
+                    selection_reason_json=json.dumps(
+                        {
+                            "section_name": section.name,
+                            "fit_tag": item.fit_tag,
+                            "selection_rationale": item.selection_rationale,
+                            "selection_notes": issue_payload.selection_notes,
+                        },
+                        sort_keys=True,
+                    ),
                 )
         self.connection.commit()
         return issue_id, html_body
@@ -258,21 +292,32 @@ class NewsletterPipeline:
         self,
         *,
         shortlists: dict[str, list[ShortlistCandidate]],
+        profile_context: RuntimeProfileContext,
         logs: list[str],
     ) -> tuple[int, NewsletterIssuePayload, str, bool]:
         subject = self._edition_subject()
         existing_issue = self.issues_repo.get_by_subject(subject)
         if existing_issue is not None and str(existing_issue["status"]) in {"drafted", "sent"}:
-            issue_payload = NewsletterIssuePayload.model_validate_json(
-                existing_issue["json_payload"]
-            )
-            logs.append(f"issue:reused:{existing_issue['id']}:{existing_issue['status']}")
-            return int(existing_issue["id"]), issue_payload, str(existing_issue["html_body"]), True
+            try:
+                issue_payload = NewsletterIssuePayload.model_validate_json(
+                    existing_issue["json_payload"]
+                )
+            except ValidationError:
+                logs.append(f"issue:stale-format:{existing_issue['id']}")
+            else:
+                logs.append(f"issue:reused:{existing_issue['id']}:{existing_issue['status']}")
+                return (
+                    int(existing_issue["id"]),
+                    issue_payload,
+                    str(existing_issue["html_body"]),
+                    True,
+                )
 
         run_at = utc_now().isoformat()
         issue_payload = generate_issue_from_shortlist(
             run_date=datetime.now(ZoneInfo(self.settings.global_config.timezone)).date(),
             shortlists=shortlists,
+            context=profile_context,
             llm_client=self.llm_client or self._build_llm_client(),
         )
         issue_payload.subject = subject
@@ -344,7 +389,7 @@ class NewsletterPipeline:
         logs: list[str] = []
         shortlisted_count = 0
         try:
-            shortlists = self.score_candidates(logs)
+            shortlists, _ = self.score_candidates(logs)
             shortlisted_count = sum(len(bucket) for bucket in shortlists.values())
             self.runs_repo.finish_run(
                 run_id,
@@ -382,10 +427,12 @@ class NewsletterPipeline:
         logs: list[str] = []
         shortlisted_count = selected_count = 0
         try:
-            shortlists = self.score_candidates(logs)
+            shortlists, _ = self.score_candidates(logs)
             shortlisted_count = sum(len(bucket) for bucket in shortlists.values())
+            profile_context = self.profile_service.load_runtime_context()
             issue_id, issue_payload, html_body, reused = self.generate_issue(
                 shortlists=shortlists,
+                profile_context=profile_context,
                 logs=logs,
             )
             selected_count = sum(len(section.items) for section in issue_payload.sections)
@@ -429,10 +476,12 @@ class NewsletterPipeline:
         preview_path: Path | None = None
         try:
             fetched_count = self.fetch_sources(logs)
-            shortlists = self.score_candidates(logs)
+            shortlists, _ = self.score_candidates(logs)
             shortlisted_count = sum(len(bucket) for bucket in shortlists.values())
+            profile_context = self.profile_service.load_runtime_context()
             issue_id, issue_payload, html_body, reused = self.generate_issue(
                 shortlists=shortlists,
+                profile_context=profile_context,
                 logs=logs,
             )
             selected_count = sum(len(section.items) for section in issue_payload.sections)
@@ -479,6 +528,65 @@ class NewsletterPipeline:
             )
             self.connection.commit()
             raise
+
+    def refresh_profiles(self) -> dict[str, object]:
+        self.initialize()
+        context = self.profile_service.refresh_profiles()
+        self.connection.commit()
+        return cast(dict[str, object], json.loads(context.model_dump_json()))
+
+    def show_profile(self) -> dict[str, object]:
+        self.initialize()
+        return self.profile_service.describe_context()
+
+    def record_feedback(self, *, item_id: int, vote: str) -> int:
+        self.initialize()
+        item = self.items_repo.get_item(item_id)
+        if item is None:
+            raise ValueError(f"Unknown item_id: {item_id}")
+        issue_context = self.items_repo.get_latest_issue_context_for_item(item_id)
+        if issue_context is None:
+            raise ValueError(f"Item {item_id} has not been part of any issue yet.")
+        feature_snapshot = self.features_repo.get_item_features(item_id)
+        feedback_id = self.feedback_repo.record_feedback(
+            issue_id=int(issue_context["issue_id"]),
+            item_id=item_id,
+            vote=vote,
+            context_json={
+                "source_name": item.source_name,
+                "topic": item.topic,
+                "content_type": item.content_type,
+                "fit_tag": item.fit_tag,
+                "section_name": issue_context["section_name"],
+                "feature_snapshot": (
+                    feature_snapshot.model_dump(mode="json") if feature_snapshot else {}
+                ),
+            },
+        )
+        self.profile_service.rebuild_snapshot_from_feedback()
+        self.connection.commit()
+        return feedback_id
+
+    def explain_issue(self, *, issue_id: int) -> list[dict[str, object]]:
+        self.initialize()
+        rows = self.items_repo.list_issue_items(issue_id)
+        explanations: list[dict[str, object]] = []
+        for row in rows:
+            feature_snapshot = self.features_repo.get_item_features(int(row["id"]))
+            explanations.append(
+                {
+                    "item_id": int(row["id"]),
+                    "section_name": row["section_name"],
+                    "rank_in_section": int(row["rank_in_section"]),
+                    "title": row["title"],
+                    "fit_tag": row["fit_tag"],
+                    "selection_reason_json": row["selection_reason_json"],
+                    "feature_snapshot": (
+                        feature_snapshot.model_dump(mode="json") if feature_snapshot else {}
+                    ),
+                }
+            )
+        return explanations
 
 
 def run_once(settings: AppSettings, *, send_email: bool) -> PipelineResult:

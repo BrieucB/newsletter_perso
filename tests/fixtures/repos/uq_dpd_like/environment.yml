@@ -1,0 +1,6 @@
+name: uq_dpd
+dependencies:
+  - python
+  - numpy
+  - scipy
+  - pytorch
