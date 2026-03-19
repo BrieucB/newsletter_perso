@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: newsletter-v0
-Version: 0.1.0
+Version: 0.2.0
 Summary: Local-first personal newsletter service for UQ/HPC and LLM news.
 Requires-Python: >=3.12
 Description-Content-Type: text/markdown
