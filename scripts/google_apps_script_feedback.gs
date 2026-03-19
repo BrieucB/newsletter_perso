@@ -1,5 +1,5 @@
 const SHEET_NAME = "feedback";
-const SHARED_SECRET = "replace-me";
+const SHARED_SECRET = "UNiTXTpfT9CY7c7OPH2HAuYK4ZmKi_inRvnsqfa1tJM";
 
 function doGet(e) {
   const payloadToken = e.parameter.payload || "";
@@ -33,11 +33,12 @@ function handleVote(payload) {
   }
 
   const sheet = ensureSheet();
-  sheet.appendRow([
+  const voteValue = payload.vote === "+" ? "POSITIVE" : "NEGATIVE";
+  appendSafeRow(sheet, [
     Utilities.getUuid(),
     payload.issue_id,
     payload.item_id,
-    payload.vote,
+    voteValue,
     payload.recipient_key,
     payload.subject || "",
     payload.item_title || "",
@@ -45,7 +46,7 @@ function handleVote(payload) {
     new Date().toISOString(),
   ]);
 
-  const voteLabel = payload.vote === "+" ? "+ good rec" : "- bad rec";
+  const voteLabel = voteValue === "POSITIVE" ? "+ good rec" : "- bad rec";
   return htmlResponse("Recorded feedback: " + voteLabel, payload.source_url || null);
 }
 
@@ -87,6 +88,24 @@ function ensureSheet() {
     ]);
   }
   return sheet;
+}
+
+function appendSafeRow(sheet, values) {
+  const nextRow = sheet.getLastRow() + 1;
+  const range = sheet.getRange(nextRow, 1, 1, values.length);
+  range.setNumberFormat("@");
+  range.setValues([values.map((value) => safeCellValue(value))]);
+}
+
+function safeCellValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const text = String(value);
+  if (text.length > 0 && ["=", "+", "-", "@"].includes(text[0])) {
+    return "'" + text;
+  }
+  return text;
 }
 
 function verifySignedPayload(payloadToken, signature) {

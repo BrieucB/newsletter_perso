@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import requests
+from pydantic import ValidationError
 
 from app.feedback.models import RemoteFeedbackEvent
 from app.feedback.signing import build_sync_url
+
+logger = logging.getLogger(__name__)
 
 
 class FeedbackSyncClient:
@@ -31,8 +36,23 @@ class FeedbackSyncClient:
         if not isinstance(events, list):
             raise ValueError("Feedback sync response must contain a list of events.")
         parsed_events: list[RemoteFeedbackEvent] = []
-        for event in events:
+        for index, event in enumerate(events):
             if not isinstance(event, dict):
-                raise ValueError("Feedback event entries must be objects.")
-            parsed_events.append(RemoteFeedbackEvent.model_validate(event))
+                logger.warning(
+                    "Skipping malformed feedback event because it is not an object",
+                    extra={"event_index": index},
+                )
+                continue
+            try:
+                parsed_events.append(RemoteFeedbackEvent.model_validate(event))
+            except ValidationError as exc:
+                logger.warning(
+                    "Skipping malformed feedback event during sync",
+                    extra={
+                        "event_index": index,
+                        "external_event_id": event.get("external_event_id"),
+                        "vote": event.get("vote"),
+                    },
+                    exc_info=exc,
+                )
         return parsed_events

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class FeedbackVotePayload(BaseModel):
@@ -33,6 +33,18 @@ class RemoteFeedbackEvent(BaseModel):
     subject: str | None = None
     item_title: str | None = None
     source_url: str | None = None
+
+    @field_validator("vote", mode="before")
+    @classmethod
+    def normalize_vote(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise TypeError("Feedback vote must be a string.")
+        normalized = value.strip().upper()
+        if normalized in {"+", "POSITIVE"}:
+            return "+"
+        if normalized in {"-", "NEGATIVE"}:
+            return "-"
+        raise ValueError("Feedback vote must be one of +, -, POSITIVE, or NEGATIVE.")
 
 
 class FeedbackRenderLinks(BaseModel):

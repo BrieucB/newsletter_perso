@@ -223,3 +223,129 @@ def test_generate_issue_from_shortlist_trims_overlong_output_to_balanced_eight()
     assert sum(len(section.items) for section in issue.sections) == 8
     assert issue.sections[0].items[0].candidate_id == "1"
     assert issue.sections[1].items[-1].candidate_id == "9"
+
+
+def test_generate_issue_from_shortlist_rejects_empty_shortlist() -> None:
+    with pytest.raises(ValueError, match="No shortlisted candidates"):
+        generate_issue_from_shortlist(
+            run_date=__import__("datetime").date(2026, 3, 18),
+            shortlists={},
+            context=build_test_profile_context(),
+            llm_client=FakeLLMClient(_valid_issue_payload()),
+        )
+
+
+def test_generate_issue_from_shortlist_rejects_duplicate_candidate_ids() -> None:
+    payload = NewsletterIssuePayload.model_validate(
+        {
+            "subject": "Briefing | 2026-03-18",
+            "intro": "Short intro.",
+            "sections": [
+                {
+                    "name": "Most relevant for your work",
+                    "items": [
+                        {
+                            "candidate_id": "1",
+                            "title": "Title 1",
+                            "what_happened": "Short analytical summary.",
+                            "why_you_should_care": "Useful for work.",
+                            "fit_tag": "current_work",
+                            "source_name": "OpenAI News",
+                            "source_url": "https://example.com/1",
+                        },
+                        {
+                            "candidate_id": "1",
+                            "title": "Title 1 duplicate",
+                            "what_happened": "Short analytical summary.",
+                            "why_you_should_care": "Useful for work.",
+                            "fit_tag": "current_work",
+                            "source_name": "OpenAI News",
+                            "source_url": "https://example.com/1",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Duplicate candidate_id"):
+        generate_issue_from_shortlist(
+            run_date=__import__("datetime").date(2026, 3, 18),
+            shortlists={"uq_hpc": [_candidate(item_id, "uq_hpc") for item_id in range(1, 9)]},
+            context=build_test_profile_context(),
+            llm_client=FakeLLMClient(payload),
+        )
+
+
+def test_generate_issue_from_shortlist_rejects_skewed_balance() -> None:
+    payload = NewsletterIssuePayload.model_validate(
+        {
+            "subject": "Briefing | 2026-03-18",
+            "intro": "Short intro.",
+            "sections": [
+                {
+                    "name": "Only work",
+                    "items": [
+                        {
+                            "candidate_id": str(item_id),
+                            "title": f"Title {item_id}",
+                            "what_happened": "Short analytical summary.",
+                            "why_you_should_care": "Useful for work.",
+                            "fit_tag": "current_work",
+                            "source_name": "OpenAI News",
+                            "source_url": f"https://example.com/{item_id}",
+                        }
+                        for item_id in range(1, 9)
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="too skewed"):
+        generate_issue_from_shortlist(
+            run_date=__import__("datetime").date(2026, 3, 18),
+            shortlists={
+                "uq_hpc": [_candidate(item_id, "uq_hpc") for item_id in range(1, 5)],
+                "llm": [_candidate(item_id, "llm") for item_id in range(5, 9)],
+            },
+            context=build_test_profile_context(),
+            llm_client=FakeLLMClient(payload),
+        )
+
+
+def test_generate_issue_from_shortlist_preserves_original_issue_when_not_normalizable() -> None:
+    payload = NewsletterIssuePayload.model_validate(
+        {
+            "subject": "Briefing | 2026-03-18",
+            "intro": "Short intro.",
+            "sections": [
+                {
+                    "name": "Mixed",
+                    "items": [
+                        {
+                            "candidate_id": str(item_id),
+                            "title": f"Title {item_id}",
+                            "what_happened": "Short analytical summary.",
+                            "why_you_should_care": "Useful.",
+                            "fit_tag": "current_work",
+                            "source_name": "OpenAI News",
+                            "source_url": f"https://example.com/{item_id}",
+                        }
+                        for item_id in range(1, 10)
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Expected exactly 8 selected items"):
+        generate_issue_from_shortlist(
+            run_date=__import__("datetime").date(2026, 3, 18),
+            shortlists={
+                "uq_hpc": [_candidate(item_id, "uq_hpc") for item_id in range(1, 5)],
+                "llm": [_candidate(item_id, "llm") for item_id in range(5, 10)],
+            },
+            context=build_test_profile_context(),
+            llm_client=FakeLLMClient(payload),
+        )

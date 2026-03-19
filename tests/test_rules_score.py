@@ -2,8 +2,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.models import StoredItem
-from app.ranking.rules import compute_rule_score
+from app.ranking.rules import (
+    _freshness_score,
+    _genericity_penalty,
+    _hype_penalty,
+    _payload,
+    _payload_int,
+    _source_quality_score,
+    _theoretical_penalty,
+    _traction_score,
+    compute_rule_score,
+    infer_content_type,
+    infer_fit_tag,
+)
 from tests.conftest import build_test_profile_context
 
 
@@ -96,3 +110,124 @@ def test_compute_rule_score_excludes_exact_sent_titles() -> None:
 
     assert score.excluded is True
     assert score.score == -1000.0
+
+
+def test_rule_helpers_cover_content_type_and_penalties() -> None:
+    now = datetime.now(tz=UTC)
+    release_item = _stored_item(
+        item_id=4,
+        title="Release note: benchmark changelog",
+        summary="changelog",
+        topic="llm",
+        published_delta_days=2,
+    ).model_copy(
+        update={
+            "url": "https://example.com/releases/v1",
+            "raw_payload_json": '{"query":"engineering"}',
+        }
+    )
+    other_item = release_item.model_copy(
+        update={
+            "id": 5,
+            "source_kind": "other",
+            "url": "https://example.com/page",
+            "title": "New model",
+            "raw_summary": None,
+            "raw_payload_json": "not-json",
+        }
+    )
+    github_item = release_item.model_copy(
+        update={
+            "id": 6,
+            "source_kind": "github_search",
+            "raw_payload_json": '{"stargazers_count":"120","forks_count":"11"}',
+            "title": "Revolutionary trade-off benchmark",
+            "url": "https://linkedin.example.com/post",
+        }
+    )
+
+    assert infer_content_type(release_item) == "release_note"
+    assert infer_content_type(github_item) == "tool_or_repo"
+    assert infer_content_type(other_item) == "other"
+    assert _payload(other_item) == {}
+    assert _payload_int({"ok": True}, "ok") == 1
+    assert _payload_int({"stars": "120"}, "stars") == 120
+    assert _payload_int({"stars": "oops"}, "stars") == 0
+    assert _freshness_score(release_item, now=now) == 3.8
+    assert _source_quality_score(github_item, content_type="tool_or_repo") >= 2.2
+    assert _traction_score(github_item, content_type="tool_or_repo") == 2.2
+    assert _hype_penalty(github_item, haystack="revolutionary new model dropped") >= 3.3
+    assert _genericity_penalty(other_item, haystack="new model") >= 2.4
+    assert infer_fit_tag(work_score=2.0, llm_score=2.1) == "both"
+
+
+def test_compute_rule_score_exclusion_paths() -> None:
+    theoretical_item = _stored_item(
+        item_id=7,
+        title="Posterior contraction theorem",
+        summary="Proof and theorem for posterior contraction formalism.",
+        topic="uq_hpc",
+        published_delta_days=1,
+    ).model_copy(
+        update={
+            "source_kind": "arxiv",
+            "source_name": "arXiv: Bayesian calibration",
+            "url": "https://arxiv.org/abs/7",
+        }
+    )
+    duplicate_title_item = _stored_item(
+        item_id=8,
+        title="Useful applied title",
+        summary="GPU workflow details.",
+        topic="llm",
+        published_delta_days=1,
+    )
+
+    same_domain_score = compute_rule_score(
+        duplicate_title_item,
+        context=build_test_profile_context(),
+        sent_titles=set(),
+        sent_domain_titles={("example.com", duplicate_title_item.normalized_title)},
+        title_frequency={duplicate_title_item.normalized_title: 1},
+    )
+    theoretical_score = compute_rule_score(
+        theoretical_item,
+        context=build_test_profile_context(),
+        sent_titles=set(),
+        sent_domain_titles=set(),
+        title_frequency={theoretical_item.normalized_title: 1},
+    )
+    duplicate_score = compute_rule_score(
+        duplicate_title_item,
+        context=build_test_profile_context(),
+        sent_titles=set(),
+        sent_domain_titles=set(),
+        title_frequency={duplicate_title_item.normalized_title: 2},
+    )
+
+    assert same_domain_score.reasons == ["same-domain-same-title"]
+    assert theoretical_score.excluded is True
+    assert "overly-theoretical-without-applied-angle" in theoretical_score.reasons
+    assert duplicate_score.excluded is True
+    assert "near-duplicate-title" in duplicate_score.reasons
+
+
+@pytest.mark.parametrize(
+    ("content_type", "haystack", "expected"),
+    [
+        ("paper", "theorem proof formalism", 2.4),
+        ("engineering_blog", "workflow benchmark", 0.0),
+    ],
+)
+def test_theoretical_penalty_varies_by_content_type(
+    content_type: str, haystack: str, expected: float
+) -> None:
+    item = _stored_item(
+        item_id=9,
+        title="Title",
+        summary="summary",
+        topic="uq_hpc",
+        published_delta_days=1,
+    )
+
+    assert _theoretical_penalty(item, content_type=content_type, haystack=haystack) == expected

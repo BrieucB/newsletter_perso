@@ -39,7 +39,7 @@ def test_feedback_sync_client_parses_events() -> None:
                     "external_event_id": "event-1",
                     "issue_id": 2,
                     "item_id": 46,
-                    "vote": "+",
+                    "vote": "POSITIVE",
                     "recipient_key": "reader-key",
                     "subject": "Briefing | 2026-03-18",
                     "item_title": "Serving benchmark",
@@ -59,6 +59,7 @@ def test_feedback_sync_client_parses_events() -> None:
 
     assert len(events) == 1
     assert isinstance(events[0], RemoteFeedbackEvent)
+    assert events[0].vote == "+"
     assert session.requested_url is not None and "payload=" in session.requested_url
 
 
@@ -72,3 +73,41 @@ def test_feedback_sync_client_rejects_invalid_payload() -> None:
 
     with pytest.raises(ValueError):
         client.fetch_events()
+
+
+def test_feedback_sync_client_skips_invalid_event_rows() -> None:
+    session = FakeSession(
+        {
+            "events": [
+                {
+                    "external_event_id": "bad-event",
+                    "issue_id": 3,
+                    "item_id": 13,
+                    "vote": "#ERROR!",
+                    "recipient_key": "reader-key",
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                },
+                {
+                    "external_event_id": "good-event",
+                    "issue_id": 3,
+                    "item_id": 13,
+                    "vote": "NEGATIVE",
+                    "recipient_key": "reader-key",
+                    "subject": "Briefing | 2026-03-19",
+                    "item_title": "Calibration note",
+                    "source_url": "https://example.com/item",
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                },
+            ]
+        }
+    )
+    client = FeedbackSyncClient(
+        base_url="https://script.google.com/macros/s/test/exec",
+        secret="feedback-secret",
+        session=session,  # type: ignore[arg-type]
+    )
+
+    events = client.fetch_events()
+
+    assert [event.external_event_id for event in events] == ["good-event"]
+    assert events[0].vote == "-"
